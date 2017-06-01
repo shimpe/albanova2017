@@ -100,7 +100,7 @@ s.waitForBoot({
 	SynthDef(\xfiles, {
 		|out = 0, freq = 440, gate = 1, amp = 0.1, release = 0.2, mode=\poly, glissandoTime = 1|
 		var snd;
-				var currentGlissandoTime = { | mode |
+		var currentGlissandoTime = { | mode |
             if ((mode == \poly), {
                 0;
             }, /* else */ {
@@ -116,6 +116,22 @@ s.waitForBoot({
 		snd = snd * EnvGen.ar(Env.adsr(0.03, 0.1, 0.9, release), gate, doneAction: Done.none);
 		snd = Pan2.ar(snd, 0, amp);
 		Out.ar(out, snd);
+	}).add;
+
+	SynthDef(\voice,{arg out=0,freq=440,gate=0,p=0,d=10,r=10, mode=\poly, glissandoTime=1;
+		var currentGlissandoTime = { | mode |
+            if ((mode == \poly), {
+                0;
+            }, /* else */ {
+                glissandoTime;
+            });
+        };
+		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var sig=Array.fill(3,{|i| VarSaw.ar(laggedFreq*(i+1.0001),mul:0.05/(i+1))}).sum;
+		var n=laggedFreq.cpsmidi;
+		var sig2=Ringz.ar(WhiteNoise.ar(0.0003),TRand.ar(n,(n+1).midicps,Impulse.ar(10)));
+		var env=EnvGen.kr(Env.linen(d,1,r),gate:gate,doneAction:2);
+		Out.ar(out,Pan2.ar((sig+sig2)*env*(0.8+SinOsc.kr(0.1,0,0.2)),p));
 	}).add;
 
     SynthDef(\sound, {
@@ -134,6 +150,74 @@ s.waitForBoot({
 		sig = sig * env * amp;
 		Out.ar(out, sig!2);
 	}).add;
+
+
+	SynthDef(\sound6, {
+		| out=0, freq=55, amp=0.25, gate=0, bend=0, modulation=8192, mode=\poly, glissandoTime = 1 |
+		var currentGlissandoTime = { | mode |
+            if ((mode == \poly), {
+                0;
+            }, /* else */ {
+                glissandoTime;
+            });
+        };
+		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var pct = 2.0;
+		var mult = 2;
+		var spectralfactor=0.5;
+		var spectraldecay=SinOsc.kr(0.01).linexp(-1,1,4,0.98);
+		var overtone = [ 0, 12, 19, 24, 28];
+		var freqs = overtone.collect({ | el, i | laggedFreq*(el.midiratio) });
+		amp= amp*3;
+
+		a = 0;
+		spectralfactor = 1;
+		freqs.do({
+			| freq, i |
+			a = a + (spectralfactor*Formant.ar(
+				freqs[i]+LFNoise1.ar(3,freqs[i]*pct/100.0),
+				freqs[i]+LFNoise1.ar(3,freqs[i]*pct/100.0),
+				freqs[i]*LFNoise1.ar(10,mult))).tanh;
+			spectralfactor = spectralfactor / (spectraldecay**i);
+		});
+		a = amp*a*EnvGen.kr(Env.adsr(0.01,0.3,0.5,15,1,\cubed), gate, doneAction:Done.freeSelf);
+
+		9.do{
+			a=AllpassL.ar(a.tanh, 0.3, {0.1.rand+0.2}!2, 5);
+		};
+
+		Out.ar(out, a.tanh);
+
+	}).add;
+
+	SynthDef(\sound7, {
+		| out=0, freq=55, amp=0.25, gate, bend=0, modulation=8192, mode=\poly, glissandoTime =1 |
+		var currentGlissandoTime = { | mode |
+            if ((mode == \poly), {
+                0;
+            }, /* else */ {
+                glissandoTime;
+            });
+        };
+		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var pct = 2.0;
+		var mult = 2;
+		var spectralfactor=0.5;
+		var spectraldecay=SinOsc.kr(0.01).linexp(-1,1,4,0.98);
+		var overtone = [ 0, 12, 19, 24, 28];
+		var freqs = overtone.collect({ | el, i | laggedFreq*(el.midiratio) });
+		amp= amp*3;
+
+		b = DynKlank.ar(`[[freqs, freqs*(12.midiratio), freqs*(19.midiratio)], nil, [1, 0.9, 0.6]], BrownNoise.ar(0.01))*EnvGen.ar(Env.adsr(0.01,0.3,0.5,15,1), gate, doneAction:Done.freeSelf);
+
+		9.do{
+			b=AllpassL.ar(b, 0.3, {0.1.rand+0.2}!2, 5);
+		};
+
+		Out.ar(out, b.tanh);
+
+	}).add;
+
 
     SynthDef(\hoarsepad, {
         | out=0, freq=55, amp=0.25, gate=1, bend=0, modulation=8192, mode=\poly, glissandoTime = 1 |
@@ -218,7 +302,7 @@ s.waitForBoot({
 
     });
 
-	possibleSounds = [["X-Files", "Hoarse Pad", "Sound"], [\xfiles, \hoarsepad, \sound]];
+	possibleSounds = [["X-Files", "Hoarse Pad", "Sound", "Sound6", "Sound7", "Voice"], [\xfiles, \hoarsepad, \sound, \sound6, \sound7, \voice]];
     soundSelector = soundSelector.add([
         PopUpMenu(mainWindow, Rect()).items_(possibleSounds[0]).
 		action_({ | ctrl | ~selectedSound = possibleSounds[1][ctrl.value]; possibleButtons[~selectedModeIndex][1].value; }),
