@@ -1,10 +1,11 @@
 (
-s.options.memSize = 8192*10;
+s.options.memSize = 8192*100;
 s.waitForBoot({
 	var mainWindow, userView, mainLayout;
 	var possibleButtons = [], possibleSounds = [];
 	var radioButtons = [];
 	var soundSelector = [];
+	var volumeSlider = [];
 
 	MIDIdef.freeAll;
 	MIDIClient.init;
@@ -20,6 +21,7 @@ s.waitForBoot({
 	~selectedSound = \hoarsepad;
 	~selectedMode = \gliss;
 	~selectedModeIndex = 0;
+	~selectedVolume = 0.5;
 
 	~clearNotes = {
 		~notes.do({
@@ -27,6 +29,10 @@ s.waitForBoot({
 			n.set(\gate,0);
 		});
 		~notes = Array.newClear(128);
+	};
+
+	~volumeHandler = { | val |
+		~selectedVolume = val.value.asFloat;
 	};
 
 	~polyButtonHandler = {
@@ -39,6 +45,7 @@ s.waitForBoot({
 					\gate, 1,
 					\bend, ~bend,
 					\modulation, ~modulation,
+					\globalVolumeSlider, ~selectedVolume,
 					\doneAction, Done.freeSelf
 			]);
 		});
@@ -70,6 +77,7 @@ s.waitForBoot({
 						\modulation, ~modulation,
 						\mode, ~selectedMode,
 						\glissandoTime, ~glissandoTime,
+						\globalVolumeSlider, ~selectedVolume,
 						\doneAction, Done.none
 				]);
 			}, /* else */ {
@@ -80,6 +88,7 @@ s.waitForBoot({
 					\bend, ~bend,
 					\modulation, ~modulation,
 					\mode, ~selectedMode,
+					\globalVolumeSlider, ~selectedVolume,
 					\glissandoTime, ~glissandoTime
 				);
 			});
@@ -100,7 +109,7 @@ s.waitForBoot({
 
 
 	SynthDef(\xfiles, {
-		|out = 0, freq = 440, gate = 1, amp = 0.1, release = 0.2, mode=\poly, glissandoTime=1, doneAct=2 |
+		|out = 0, freq = 440, gate = 1, amp = 0.1, release = 0.2, mode=\poly, glissandoTime=1, globalVolumeSlider=0.5, doneAct=2 |
 		var snd;
 		var currentGlissandoTime = { | mode |
 			if ((mode == \poly), {
@@ -109,18 +118,18 @@ s.waitForBoot({
 				glissandoTime;
 			});
 		};
-		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var laggedFreq = VarLag.kr(freq, currentGlissandoTime.value(mode), warp:\exponential);
 		// whistle sound comes from narrow band pass on pink noise.
 		// LFNoise2 is used as an LFO to add some waviness to the pitch.
 		// super important for realism is a slight upward pitch slide on the onset (Line.kr)
 		snd = BPF.ar(PinkNoise.ar, laggedFreq * (2 ** ({ LFNoise2.kr(6, 0.01) } ! 3 + Line.kr(-0.08, 0, 0.07))), 0.001) * 200;
 		snd = Splay.ar(snd);
 		snd = snd * EnvGen.ar(Env.adsr(0.03, 0.1, 0.9, release), gate, doneAction: doneAct);
-		snd = Pan2.ar(snd, 0, amp);
+		snd = globalVolumeSlider*Pan2.ar(snd, 0, amp);
 		Out.ar(out, snd);
 	}).add;
 
-	SynthDef(\voice,{arg out=0,freq=440,gate=1,p=0,d=10,r=10, mode=\poly, glissandoTime=1, doneAct=2;
+	SynthDef(\voice,{arg out=0,freq=440,gate=1,p=0,d=10,r=10, mode=\poly, glissandoTime=1, globalVolumeSlider=0.5, doneAct=2;
 		var currentGlissandoTime = { | mode |
 			if ((mode == \poly), {
 				0;
@@ -128,16 +137,16 @@ s.waitForBoot({
 				glissandoTime;
 			});
 		};
-		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var laggedFreq = VarLag.kr(freq, currentGlissandoTime.value(mode), warp:\exponential);
 		var sig=Array.fill(3,{|i| VarSaw.ar(laggedFreq*(i+1.0001),mul:0.05/(i+1))}).sum;
 		var n=laggedFreq.cpsmidi;
 		var sig2=Ringz.ar(WhiteNoise.ar(0.0003),TRand.ar(n,(n+1).midicps,Impulse.ar(10)));
 		var env=EnvGen.kr(Env.linen(d,1,r),gate:gate,doneAction:doneAct);
-		Out.ar(out,Pan2.ar((sig+sig2)*env*(0.8+SinOsc.kr(0.1,0,0.2)),p));
+		Out.ar(out,globalVolumeSlider*Pan2.ar((sig+sig2)*env*(0.8+SinOsc.kr(0.1,0,0.2)),p));
 	}).add;
 
 	SynthDef(\sound, {
-		| out=0, freq=440, amp=0.3, gate=0, bend=0, modulation=8192, mode=\poly, glissandoTime = 1, doneAct=2 |
+		| out=0, freq=440, amp=0.3, gate=0, bend=0, modulation=8192, mode=\poly, glissandoTime = 1, globalVolumeSlider=0.5, doneAct=2 |
 		var sig, env;
 		var currentGlissandoTime = { | mode |
 			if ((mode == \poly), {
@@ -146,16 +155,16 @@ s.waitForBoot({
 				glissandoTime;
 			});
 		};
-		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var laggedFreq = VarLag.kr(freq, currentGlissandoTime.value(mode), warp:\exponential);
 		sig = SinOsc.kr(~modulationFreq,0,mul:(~modulationDepth*modulation)/64.0,add:1)*SinOsc.ar(laggedFreq* bend.linlin(0,16383,~bendSemitones.neg,~bendSemitones).midiratio);
 		env = EnvGen.kr(Env.adsr(~attackTime), gate, doneAction:doneAct);
-		sig = sig * env * amp;
+		sig = globalVolumeSlider * sig * env * amp;
 		Out.ar(out, sig!2);
 	}).add;
 
 
 	SynthDef(\sound6, {
-		| out=0, freq=55, amp=0.25, gate=0, bend=0, modulation=8192, mode=\poly, glissandoTime = 1, doneAct=2 |
+		| out=0, freq=55, amp=0.25, gate=0, bend=0, modulation=8192, mode=\poly, glissandoTime = 1, globalVolumeSlider=0.5, doneAct=2 |
 		var currentGlissandoTime = { | mode |
 			if ((mode == \poly), {
 				0;
@@ -163,7 +172,7 @@ s.waitForBoot({
 				glissandoTime;
 			});
 		};
-		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var laggedFreq = VarLag.kr(freq, currentGlissandoTime.value(mode), warp:\exponential);
 		var pct = 2.0;
 		var mult = 2;
 		var spectralfactor=0.5;
@@ -188,12 +197,12 @@ s.waitForBoot({
 			a=AllpassL.ar(a.tanh, 0.3, {0.1.rand+0.2}!2, 5);
 		};
 
-		Out.ar(out, a.tanh);
+		Out.ar(out, (globalVolumeSlider*a).tanh);
 
 	}).add;
 
 	SynthDef(\sound7, {
-		| out=0, freq=55, amp=0.25, gate, bend=0, modulation=8192, mode=\poly, glissandoTime =1, doneAct=2 |
+		| out=0, freq=55, amp=0.25, gate, bend=0, modulation=8192, mode=\poly, glissandoTime =1, globalVolumeSlider=0.5, doneAct=2 |
 		var currentGlissandoTime = { | mode |
 			if ((mode == \poly), {
 				0;
@@ -201,7 +210,7 @@ s.waitForBoot({
 				glissandoTime;
 			});
 		};
-		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var laggedFreq = VarLag.kr(freq, currentGlissandoTime.value(mode), warp:\exponential);
 		var pct = 2.0;
 		var mult = 2;
 		var spectralfactor=0.5;
@@ -216,13 +225,13 @@ s.waitForBoot({
 			b=AllpassL.ar(b, 0.3, {0.1.rand+0.2}!2, 5);
 		};
 
-		Out.ar(out, b.tanh);
+		Out.ar(out, (globalVolumeSlider*b).tanh!2);
 
 	}).add;
 
 
 	SynthDef(\hoarsepad, {
-		| out=0, freq=55, amp=0.25, gate=1, bend=0, modulation=8192, mode=\poly, glissandoTime = 1, doneAct=2 |
+		| out=0, freq=55, amp=0.25, gate=1, bend=0, modulation=8192, mode=\poly, glissandoTime = 1, globalVolumeSlider=0.5, doneAct=2 |
 		var pct = 2.0;
 		var mult = 2;
 		var spectralfactor=0.5;
@@ -235,7 +244,7 @@ s.waitForBoot({
 				glissandoTime;
 			});
 		};
-		var laggedFreq = Lag.kr(freq, currentGlissandoTime.value(mode));
+		var laggedFreq = VarLag.kr(freq, currentGlissandoTime.value(mode), warp:\exponential);
 		var freqs = overtone.collect({ | el, i | laggedFreq*(el.midiratio) });
 		amp= amp*3;
 
@@ -261,7 +270,7 @@ s.waitForBoot({
 
 		c = [a, b];
 
-		Out.ar(out, Select.ar(SinOsc.kr(0.2),c).tanh);
+		Out.ar(out, globalVolumeSlider*Select.ar(SinOsc.kr(0.2),c).tanh);
 
 	}).add;
 
@@ -295,6 +304,7 @@ s.waitForBoot({
 	mainWindow = Window.new.front;
 	userView = UserView(mainWindow, Rect());
 
+	volumeSlider = volumeSlider.add([Slider.new(mainWindow,Rect(0,0,200,20)).value_(0.5).orientation_(\horizontal).action_(~volumeHandler), columns:2]);
 	possibleButtons =  [["Polyphonic", ~polyButtonHandler], ["Glissando", ~glissandoButtonHandler]];
 	possibleButtons.do({ | el |
 		radioButtons = radioButtons.add([
@@ -304,7 +314,7 @@ s.waitForBoot({
 
 	});
 
-	possibleSounds = [["X-Files", "Hoarse Pad", "Sound", "Sound6", "Sound7", "Voice"], [\xfiles, \hoarsepad, \sound, \sound6, \sound7, \voice]];
+	possibleSounds = [["X-Files", "Hoarse Pad", "Sound", "Sound6", "Sound7"], [\xfiles, \hoarsepad, \sound, \sound6, \sound7]];
 	soundSelector = soundSelector.add([
 		PopUpMenu(mainWindow, Rect()).items_(possibleSounds[0]).
 		action_({ | ctrl | ~selectedSound = possibleSounds[1][ctrl.value]; possibleButtons[~selectedModeIndex][1].value; }),
@@ -313,7 +323,7 @@ s.waitForBoot({
 
 	~polyButtonHandler.value;
 
-	mainLayout = GridLayout.rows(radioButtons, soundSelector);
+	mainLayout = GridLayout.rows(volumeSlider, radioButtons, soundSelector);
 	mainWindow.layout_(mainLayout);
 });
 )
